@@ -18,6 +18,152 @@ module type ENCODING = sig
   val encode_rule : ?sg:Signature.t -> 'a Rule.rule -> 'a Rule.rule
 end
 
+module type ENCODING_ENTRIES = sig
+  include ENCODING
+  val encode_entry :
+    ?sg:Signature.t -> ?ctx:Term.typed_context -> Entry.entry -> Term.term list
+
+  val decode_entry : Term.term -> Entry.entry option
+end
+
+exception Not_a_pattern
+
+let rec pattern_of_term t =
+  let open Term in
+  match t with
+  | Kind | Type _ | Pi _ -> raise Not_a_pattern
+  | Lam (lc, x, _, te) -> Rule.Lambda (lc, x, pattern_of_term te)
+  | App (Const (lc, name), a, args) ->
+      Rule.Pattern (lc, name, List.map pattern_of_term (a :: args))
+  | App (DB (lc, x, n), a, args) ->
+      Rule.Var (lc, x, n, List.map pattern_of_term (a :: args))
+  | Const (lc, name) -> Rule.Pattern (lc, name, [])
+  | DB (lc, x, n) -> Rule.Var (lc, x, n, [])
+  | _ -> raise Not_a_pattern
+
+module MakeEntries (E : ENCODING) : ENCODING_ENTRIES = struct
+  include E
+  open Basic
+  open Term
+
+  let name_of str = mk_name E.md (mk_ident str)
+  let const_of str = mk_Const dloc (name_of str)
+
+  let encode_id id = const_of (string_of_ident id)
+
+  let encode_rules rules =
+    List.map
+      (fun rule ->
+        let open Rule in
+        let {name=_; ctx=_ ; pat = p; rhs =r} = encode_rule rule in
+        mk_App2 (const_of "Rule") [pattern_to_term p ; encode_term r])
+      rules
+
+  let encode_scope scope =
+    match scope with
+    | Signature.Public  -> const_of "Public"
+    | Signature.Private -> const_of "Private"
+
+  let encode_opacity opaque =
+    if opaque then const_of "Opaque" else const_of "Transparent"
+
+  let encode_staticity staticity =
+    match staticity with
+    | Signature.Static      -> const_of "Static"
+    | Signature.Definable _ -> const_of "Definable"
+    | Signature.Injective   -> const_of "Injective"
+
+  let encode_decl id scope staticity ty =
+    mk_App2 (const_of "Decl") [encode_id id ; encode_scope scope ; encode_staticity staticity ; encode_term ty]
+
+  let encode_def id scope op ty te =
+    match ty with
+    | None    ->
+        mk_App2 (const_of "Def") [encode_id id ; encode_scope scope ; encode_opacity op ; encode_term te]
+    | Some t  ->
+        mk_App2 (const_of "Def") [encode_id id ; encode_scope scope ; encode_opacity op ; encode_term t ; encode_term te]
+
+  let encode_entry ?sg:_ ?ctx:_ e =
+    match e with
+    | Entry.Decl(_, id, scope, staticity, ty) -> [encode_decl id scope staticity ty]
+    | Entry.Def(_, id, scope, op, ty, te) -> [encode_def id scope op ty te]
+    | Entry.Rules(_, rules) -> encode_rules rules
+    | _ -> failwith("All entries should be declarations, definitions, or rewrite rules when reifying entries.")
+
+  let decode_id = function
+    | Const(_,name) -> id name
+    | _ -> assert false
+
+  let decode_scope = function
+    | Const(_,name) when name_eq name (name_of "Public") -> Signature.Public
+    | Const(_,name) when name_eq name (name_of "Private") -> Signature.Private
+    | _ -> assert false
+
+  let decode_staticity = function
+    | Const(_,name) when name_eq name (name_of "Static") -> Signature.Static
+    | Const(_,name) when name_eq name (name_of "Definable") -> Signature.Definable(Term.Free)
+    | Const(_,name) when name_eq name (name_of "Injective") -> Signature.Injective
+    | _ -> assert false
+
+  let decode_opacity = function
+    | Const(_,name) when name_eq name (name_of "Opaque") -> true
+    | Const(_,name) when name_eq name (name_of "Transparent") -> false
+    | _ -> assert false
+
+  let decode_Decl a = function
+    | [encoded_scope ; encoded_staticity; encoded_ty] ->
+        Entry.Decl(dloc, decode_id a, decode_scope encoded_scope, decode_staticity encoded_staticity, decode_term encoded_ty)
+    | _ -> assert false
+
+  let decode_Def a = function
+    | [encoded_scope ; encoded_opacity ; encoded_term] ->
+        Entry.Def(dloc, decode_id a, decode_scope encoded_scope, decode_opacity encoded_opacity, None, decode_term encoded_term)
+    | [encoded_scope ; encoded_opacity ; encoded_type ; encoded_term ] ->
+        Entry.Def(dloc, decode_id a, decode_scope encoded_scope, decode_opacity encoded_opacity, Some(decode_term encoded_type), decode_term encoded_term)
+    | _ -> assert false
+
+  module VarSet = Set.Make(struct
+                      type t = ident
+                      let compare a b = if (ident_eq a b) then 1 else 0
+                    end)
+
+  let rec free_vars_of_pattern pat_list =
+    let open Rule in
+    let fv_pat_tl = free_vars_of_pattern (List.tl pat_list) in
+    let union_fv_pat_tl = VarSet.union fv_pat_tl in
+    match (List.hd pat_list) with
+    | Var(_,id,_ ,var_pat_list) ->
+        let fv_var_pat_list = free_vars_of_pattern var_pat_list in
+          VarSet.add id (union_fv_pat_tl fv_var_pat_list)
+    | Pattern(_,_,pat_pat_list) -> union_fv_pat_tl (free_vars_of_pattern pat_pat_list)
+    | Lambda(_,id,pat) ->
+        let fv_abs_pat = VarSet.remove id (free_vars_of_pattern [pat]) in
+        union_fv_pat_tl fv_abs_pat
+    | _ -> failwith("Brackets are not yet managed for meta-entries")
+
+  let decode_Rule encoded_pat = function
+    | [encoded_rhs] ->
+        let open Rule in
+        let pat = pattern_of_term (decode_term encoded_pat) in
+        let ctx = List.map (fun id -> (dloc, id, None)) (VarSet.elements(free_vars_of_pattern [pat])) in
+        let rhs = decode_term encoded_rhs in
+        let ptr = {name = Beta; ctx = ctx; pat = pat; rhs = rhs} in
+        Entry.Rules(dloc, [ptr])
+    | _ -> assert false
+
+  let decode_entry = function
+    | Const(_, name) when name_eq name (name_of "EmptyEntry") -> None
+    | App(f, a, args) ->
+        (match f with
+         | Const(_, name) when name_eq name (name_of "Decl")  -> Some(decode_Decl a args)
+         | Const(_, name) when name_eq name (name_of "Def")   -> Some(decode_Def a args)
+         | Const(_, name) when name_eq name (name_of "Rule")  -> Some(decode_Rule a args)
+         | _                                                  -> assert false)
+    | _               -> assert false
+end
+
+let entries_decl = ["Decl"; "Def"; "Rule"; "Public"; "Private"; "Static"; "Definable"; "Injective"; "EmptyEntry" ; "Opaque"; "Transparent"]
+
 module RNS = Set.Make (struct
   type t = Rule.rule_name
 
@@ -35,6 +181,8 @@ type cfg = {
   (* entries are registered before they have been normalized *)
   encoding : (module ENCODING) option;
   (* Encoding specify a quoting mechanism *)
+  metaentries : bool;
+  (* Entries are reified *)
   decoding : bool; (* If false, the term is not decoded after normalization *)
 }
 
@@ -45,8 +193,8 @@ let signature_add_rule sg r = Signature.add_rules sg [Rule.to_rule_infos r]
 (* Several rules might be bound to different constants *)
 let signature_add_rules sg rs = List.iter (signature_add_rule sg) rs
 
-let default_config ?meta_rules ?(beta = true) ?encoding ?(decoding = true)
-    ?(register_before = true) ~load_path () =
+let default_config ?meta_rules ?(beta = true) ?encoding ?(metaentries=false) ?(decoding = true)
+      ?(register_before = true) ~load_path () =
   let meta_mident = Basic.mk_mident "<meta>" in
   let find_object_file = Files.find_object_file_exn load_path in
   let meta_signature =
@@ -64,7 +212,7 @@ let default_config ?meta_rules ?(beta = true) ?encoding ?(decoding = true)
         RNS.of_list (List.map rule_name rules))
       meta_rules
   in
-  {meta_signature; meta_rules; beta; encoding; decoding; register_before}
+  {meta_signature; meta_rules; beta; encoding; metaentries; decoding; register_before}
 
 let add_rules cfg rules =
   signature_add_rules cfg.meta_signature rules;
@@ -112,7 +260,7 @@ module PROD = struct
           Signature.Definable Free,
           mk_Type dloc )
     in
-    List.map mk_decl ["ty"; "prod"]
+    List.map mk_decl (["ty"; "prod"] @ entries_decl)
 
   let signature =
     let find_object_file = Files.find_object_file_exn Files.empty in
@@ -121,7 +269,7 @@ module PROD = struct
       Signature.add_declaration sg dloc (mk_ident id) Signature.Public
         (Signature.Definable Free) (mk_Type dloc)
     in
-    List.iter mk_decl ["ty"; "prod"];
+    List.iter mk_decl (["ty"; "prod"] @ entries_decl);
     sg
 
   let safe = false
@@ -548,20 +696,6 @@ let mk_term ?env cfg term =
   let term'' = normalize cfg sg term' in
   if cfg.decoding then decode cfg term'' else term''
 
-exception Not_a_pattern
-
-let rec pattern_of_term t =
-  let open Term in
-  match t with
-  | Kind | Type _ | Pi _ -> raise Not_a_pattern
-  | Lam (lc, x, _, te) -> Rule.Lambda (lc, x, pattern_of_term te)
-  | App (Const (lc, name), a, args) ->
-      Rule.Pattern (lc, name, List.map pattern_of_term (a :: args))
-  | App (DB (lc, x, n), a, args) ->
-      Rule.Var (lc, x, n, List.map pattern_of_term (a :: args))
-  | Const (lc, name) -> Rule.Pattern (lc, name, [])
-  | DB (lc, x, n) -> Rule.Var (lc, x, n, [])
-  | _ -> raise Not_a_pattern
 
 let mk_rule env cfg (r : Rule.partially_typed_rule) =
   let open Rule in

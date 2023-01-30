@@ -15,7 +15,7 @@ open Parsers
 
 (** {2 Reification } *)
 
-(** The signature which implements a reification function. *)
+(** The signature which implements a reification function for terms. *)
 module type ENCODING = sig
   (** module name of the encoding *)
   val md : Basic.mident
@@ -39,6 +39,21 @@ module type ENCODING = sig
   (** [encode_rule sg r] encodes a rule [r]. [sg] is used only if [safe] is true *)
   val encode_rule : ?sg:Signature.t -> 'a Rule.rule -> 'a Rule.rule
 end
+
+(** The signature extending term reification into entry reification. *)
+module type ENCODING_ENTRIES = sig
+  include ENCODING
+
+  (** [encode_entry sg ctx t] encodes an entry [e]. [sg] and [ctx] are used only if [safe] is true *)
+  val encode_entry :
+    ?sg:Signature.t -> ?ctx:Term.typed_context -> Entry.entry -> Term.term list
+
+  (** [decode_entry t] decodes an entry [t] *)
+  val decode_entry : Term.term -> Entry.entry option
+end
+
+(**Generating entry reification from term reification. *)
+module MakeEntries (E : ENCODING) : ENCODING_ENTRIES
 
 (** A shallow encoding of products. This encoding allows to rewrite
    products. *)
@@ -81,16 +96,18 @@ module APP : ENCODING
    environment is consistent with the set of rewrite rules. *)
 type cfg
 
-(** Initliaze a configuration with the following parameters:
-    [meta_rules] = None
-    [beta]       = true
-    [encoding]   = None
-    [decoding]   = true
+(** Initialize a configuration with the following parameters:
+    [meta_rules]  = None
+    [beta]        = true
+    [encoding]    = None
+    [decoding]    = true
+    [metaentries] = false
     [register_before] = true *)
 val default_config :
   ?meta_rules:Rule.partially_typed_rule list ->
   ?beta:bool ->
   ?encoding:(module ENCODING) ->
+  ?metaentries:bool ->
   ?decoding:bool ->
   ?register_before:bool ->
   load_path:Files.t ->
@@ -109,7 +126,7 @@ module MetaConfiguration :
 (** The processor associated to [MetaConfiguration]. *)
 type _ Processor.t += MetaRules : Rule.partially_typed_rule list Processor.t
 
-(** [parse_meta_files files] returns the list of rules declares in the
+(** [parse_meta_files files] returns the list of rules declared in the
    files [files].  *)
 val parse_meta_files : string list -> Rule.partially_typed_rule list
 
