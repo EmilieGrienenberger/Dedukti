@@ -90,12 +90,12 @@ module MakeEntries (E : ENCODING) : ENCODING_ENTRIES = struct
 
   let encode_id id = const_of (string_of_ident id)
 
-  let encode_rules rules =
+  let encode_rules ?sg ?ctx rules =
     List.map
       (fun rule ->
         let open Rule in
-        let {name=_; ctx=_ ; pat = p; rhs =r} = encode_rule rule in
-        mk_App2 (const_of "Rule") [pattern_to_term p ; encode_term r])
+        let {name=_; ctx=_ ; pat = p; rhs =r} = encode_rule ?sg rule in
+        mk_App2 (const_of "Rule") [pattern_to_term p ; encode_term ?sg ?ctx r])
       rules
 
   let encode_scope scope =
@@ -112,21 +112,21 @@ module MakeEntries (E : ENCODING) : ENCODING_ENTRIES = struct
     | Signature.Definable _ -> const_of "Definable"
     | Signature.Injective   -> const_of "Injective"
 
-  let encode_decl id scope staticity ty =
-    mk_App2 (const_of "Decl") [encode_id id ; encode_scope scope ; encode_staticity staticity ; encode_term ty]
+  let encode_decl ?sg ?ctx id scope staticity ty =
+    mk_App2 (const_of "Decl") [encode_id id ; encode_scope scope ; encode_staticity staticity ; encode_term ?sg ?ctx ty]
 
-  let encode_def id scope op ty te =
+  let encode_def ?sg ?ctx id scope op ty te =
     match ty with
     | None    ->
-        mk_App2 (const_of "Def") [encode_id id ; encode_scope scope ; encode_opacity op ; encode_term te]
+        mk_App2 (const_of "Def") [encode_id id ; encode_scope scope ; encode_opacity op ; encode_term ?sg ?ctx te]
     | Some t  ->
-        mk_App2 (const_of "Def") [encode_id id ; encode_scope scope ; encode_opacity op ; encode_term t ; encode_term te]
+        mk_App2 (const_of "Def") [encode_id id ; encode_scope scope ; encode_opacity op ; encode_term ?sg ?ctx t ; encode_term ?sg ?ctx te]
 
-  let encode_entry ?sg:_ ?ctx:_ e =
+  let encode_entry ?sg ?ctx e =
     match e with
-    | Entry.Decl(_, id, scope, staticity, ty) -> [encode_decl id scope staticity ty]
-    | Entry.Def(_, id, scope, op, ty, te) -> [encode_def id scope op ty te]
-    | Entry.Rules(_, rules) -> encode_rules rules
+    | Entry.Decl(_, id, scope, staticity, ty) -> [encode_decl ?sg ?ctx id scope staticity ty]
+    | Entry.Def(_, id, scope, op, ty, te) -> [encode_def ?sg ?ctx id scope op ty te]
+    | Entry.Rules(_, rules) -> encode_rules ?sg ?ctx rules
     | _ -> failwith("All entries should be declarations, definitions, or rewrite rules when reifying entries.")
 
   let decode_id = function
