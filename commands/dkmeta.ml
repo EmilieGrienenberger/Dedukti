@@ -13,7 +13,7 @@ let equal (type a b) :
   | _ -> None
 
 let meta config meta_debug meta_rules_files no_meta quoting no_unquoting
-    register_before no_beta files =
+    register_before no_beta metaentries files =
   Config.init config;
   let encoding =
     Option.map
@@ -36,7 +36,7 @@ let meta config meta_debug meta_rules_files no_meta quoting no_unquoting
   let load_path = Config.load_path config in
   let cfg =
     Meta.default_config ~beta:(not no_beta) ?encoding
-      ~decoding:(not no_unquoting) ~register_before ~load_path ()
+      ~decoding:(not no_unquoting) ~metaentries:metaentries ~register_before ~load_path ()
   in
   (* Adding normalisation will be done with an empty list of meta rules. *)
   if no_meta then Meta.add_rules cfg [];
@@ -104,6 +104,10 @@ let no_beta =
   let doc = "Switch off beta while normalizing terms." in
   Cmdliner.Arg.(value & flag & info ["no-beta"] ~doc)
 
+let metaentries =
+  let doc = "[EXPERIMENTAL] Enable the reification of Dedukti entries." in
+  Cmdliner.Arg.(value & flag & info ["metaentries"] ~doc)
+
 let files =
   let doc = "Dedukti files to process." in
   Cmdliner.Arg.(value & pos_all file [] & info [] ~docv:"FILE" ~doc)
@@ -111,7 +115,7 @@ let files =
 let cmd_t =
   Cmdliner.Term.(
     const meta $ Config.t $ meta_debug $ meta_rules_files $ no_meta $ quoting
-    $ no_unquoting $ register_before $ no_beta $ files)
+    $ no_unquoting $ register_before $ no_beta $ metaentries $ files)
 
 let cmd =
   let doc = "Transform dk signatures using dk." in
