@@ -163,22 +163,25 @@ module MakeEntries (E : ENCODING) : ENCODING_ENTRIES = struct
 
   module VarSet = Set.Make(struct
                       type t = ident
-                      let compare a b = if (ident_eq a b) then 1 else 0
+                      let compare = compare
                     end)
 
   let rec free_vars_of_pattern pat_list =
-    let open Rule in
-    let fv_pat_tl = free_vars_of_pattern (List.tl pat_list) in
-    let union_fv_pat_tl = VarSet.union fv_pat_tl in
-    match (List.hd pat_list) with
-    | Var(_,id,_ ,var_pat_list) ->
-        let fv_var_pat_list = free_vars_of_pattern var_pat_list in
-          VarSet.add id (union_fv_pat_tl fv_var_pat_list)
-    | Pattern(_,_,pat_pat_list) -> union_fv_pat_tl (free_vars_of_pattern pat_pat_list)
-    | Lambda(_,id,pat) ->
+    match pat_list with
+    | [] -> VarSet.empty
+    | pat::pat_tail ->
+      let open Rule in
+      (match pat with
+      | Var(_,id,_ ,var_pat_list) ->
+        let rec_fv = free_vars_of_pattern (pat_tail@var_pat_list) in
+        VarSet.add id rec_fv
+      | Pattern(_,_,pat_pat_list) ->
+        let rec_fv = free_vars_of_pattern (pat_tail@pat_pat_list) in
+        rec_fv
+      | Lambda(_,id,pat) ->
         let fv_abs_pat = VarSet.remove id (free_vars_of_pattern [pat]) in
-        union_fv_pat_tl fv_abs_pat
-    | _ -> failwith("Brackets are not yet managed for meta-entries")
+        VarSet.union (free_vars_of_pattern pat_tail) fv_abs_pat
+      | _ -> failwith("Brackets are not yet managed for meta-entries"))
 
   let decode_Rule encoded_pat = function
     | [encoded_rhs] ->
