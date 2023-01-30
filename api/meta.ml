@@ -685,7 +685,7 @@ module APP = struct
   and decode_Pi _ _ _ _ = assert false
 end
 
-let encode cfg env term =
+let encode_terms cfg env term =
   let module E = (val cfg.encoding) in
   if E.safe then
     match env with
@@ -700,9 +700,30 @@ let encode cfg env term =
         E.encode_term ~sg term
   else E.encode_term term
 
-let decode cfg term =
+let encode_entries cfg env entry =
+  let module E = (val cfg.encoding) in
+  let module Entry = (val (module MakeEntries(E) : ENCODING_ENTRIES)) in
+  if E.safe then
+    match env with
+    | None ->
+        Errors.fail_sys_error
+          ~msg:
+          "A type checking environment must be provided when a safe \
+           encoding is used."
+          ()
+    | Some env ->
+        let sg = Env.get_signature env in
+        Entry.encode_entry ~sg entry
+  else Entry.encode_entry entry
+
+let decode_terms cfg term =
   let module E = (val cfg.encoding) in
   E.decode_term term
+
+let decode_entries cfg entry =
+  let module E = (val cfg.encoding) in
+  let module Entry = (val (module MakeEntries(E) : ENCODING_ENTRIES)) in
+  Entry.decode_entry entry
 
 let normalize cfg sg term =
   let red = red_cfg cfg in
@@ -724,13 +745,13 @@ let get_meta_signature cfg env =
             ()
       | Some env -> Env.get_signature env)
 
-let mk_term ?env cfg term =
-  let term' = encode cfg env term in
+let process_term ?env cfg term =
+  let term' = encode_terms cfg env term in
   let sg = get_meta_signature cfg env in
   let term'' = normalize cfg sg term' in
-  if cfg.decoding then decode cfg term'' else term''
+  if cfg.decoding then decode_terms cfg term'' else term''
 
-let mk_rule env cfg (r : Rule.partially_typed_rule) =
+let process_rule env cfg (r : Rule.partially_typed_rule) =
   let open Rule in
   let meta_signature = get_meta_signature cfg (Some env) in
   let module E = (val cfg.encoding) in
@@ -742,7 +763,7 @@ let mk_rule env cfg (r : Rule.partially_typed_rule) =
     else pattern_of_term pat'
   in
   let rhs' = normalize cfg meta_signature r'.rhs in
-  let rhs'' = if cfg.decoding then decode cfg rhs' else rhs' in
+  let rhs'' = if cfg.decoding then decode_terms cfg rhs' else rhs' in
   {pat = pat''; rhs = rhs''; ctx = r.ctx; name = r.name}
 
 module D = Basic.Debug
@@ -753,16 +774,30 @@ let bmag fmt = "\027[90m" ^^ fmt ^^ "\027[0m%!"
 
 let log fmt = D.debug debug_flag (bmag fmt)
 
-let mk_entry cfg env entry =
+let process_meta_entry cfg env entry =
+  let open Entry in
+  let module E = (val cfg.encoding) in
+  let module Entries = (val (module MakeEntries(E) : ENCODING_ENTRIES)) in
+  let term' = encode_entries cfg env entry in
+  let sg = get_meta_signature cfg env in
+  let term'' = List.map (normalize cfg sg) term' in
+  if cfg.decoding then List.filter_map (decode_entries cfg) term''
+  else
+    List.map
+      (fun term -> Decl(Basic.dloc, Basic.dmark, Signature.Public, Signature.Static, term))
+      term''
+
+let process_entry cfg env entry =
   let open Entry in
   let open Rule in
   let sg = Env.get_signature env in
   let md = Env.get_name env in
   let module E = (val cfg.encoding) in
+  let module Entries = (val (module MakeEntries(E) : ENCODING_ENTRIES)) in
   match entry with
   | Decl (lc, id, sc, st, ty) ->
       log "[NORMALIZE] %a" Basic.pp_ident id;
-      let ty' = mk_term ~env cfg ty in
+      let ty' = process_term ~env cfg ty in
       if cfg.register_before then Signature.add_declaration sg lc id sc st ty
       else Signature.add_declaration sg lc id sc st ty';
       Decl (lc, id, sc, st, ty')
@@ -778,8 +813,8 @@ let mk_entry cfg env entry =
         | Some ty -> ty
         | _ -> Term.mk_Type Basic.dloc
       in
-      let safe_ty' = mk_term ~env cfg safe_ty in
-      let te' = mk_term ~env cfg te in
+      let safe_ty' = process_term ~env cfg safe_ty in
+      let te' = process_term ~env cfg te in
       (if cfg.register_before then
        let _ =
          Signature.add_declaration sg lc id sc (Signature.Definable Free)
@@ -799,7 +834,7 @@ let mk_entry cfg env entry =
       | Some _ -> Def (lc, id, sc, opaque, Some safe_ty', te'))
   | Rules (lc, rs) ->
       (* Signature.add_rules !sg (List.map Rule.to_rule_infos rs); *)
-      let rs' = List.map (mk_rule env cfg) rs in
+      let rs' = List.map (process_rule env cfg) rs in
       if cfg.register_before then
         Signature.add_rules sg (List.map Rule.to_rule_infos rs)
       else Signature.add_rules sg (List.map Rule.to_rule_infos rs');
@@ -849,7 +884,9 @@ let make_meta_processor cfg ~post_processing =
   let module Meta = struct
     type t = unit
 
-    let handle_entry env entry = post_processing env (mk_entry cfg env entry)
+    let handle_entry env entry =
+      if cfg.metaentries then List.iter (post_processing env) (process_meta_entry cfg (Some env) entry)
+      else post_processing env (process_entry cfg env entry)
 
     let get_data _ = ()
   end in

@@ -356,7 +356,7 @@ let simplify : load_path:Api.Files.t -> string list -> unit =
       | Parsers.Entry.Require (_, _) -> ()
       | e ->
           Format.fprintf fmt "%a@." Api.Pp.Default.print_entry
-            (M.mk_entry out_cfg env e)
+            (M.process_entry out_cfg env e)
     in
     P.handle input mk_entry; P.close input; F.close output
   in

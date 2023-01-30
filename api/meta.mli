@@ -156,11 +156,11 @@ val make_meta_processor :
    The [env] argument is mandatory if a safe encoding is used or if
    the normalisation strategy is done via the type checking
    environment (i.e. no meta rules were provided). *)
-val mk_term : ?env:Env.t -> cfg -> Term.term -> Term.term
+val process_term : ?env:Env.t -> cfg -> Term.term -> Term.term
 
 (** [mk_entry cfg env entry] processes an entry according the meta
    configuration [cfg] and the current environment [env] *)
-val mk_entry : cfg -> Env.t -> Entry.entry -> Entry.entry
+val process_entry : cfg -> Env.t -> Entry.entry -> Entry.entry
 
 (** {2 Debugging/Logging } *)
 

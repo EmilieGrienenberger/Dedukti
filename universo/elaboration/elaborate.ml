@@ -33,13 +33,13 @@ let mk_term : t -> T.term -> T.term =
  fun env t ->
   (* Generate pre-universe variable first by replacing each universe with a pre-universe variable *)
   (* env.meta maps all the concrete universe to a unique constructor universo.var *)
-  let t = M.mk_term env.meta t in
+  let t = M.process_term env.meta t in
   mk_term env t
 
 (** [mkrule env r] replaces all the concrete universes in [rule.rhs] by a fresh variable
     using the environement env. *)
 let mk_rule : t -> 'a R.rule -> 'a R.rule =
- fun env rule -> R.{rule with rhs = mk_term env (M.mk_term env.meta rule.rhs)}
+ fun env rule -> R.{rule with rhs = mk_term env (M.process_term env.meta rule.rhs)}
 
 (** [mk_entry env entry] replaces all the concrete universes in [entry] by a fresh variable
     using the environment env. Commands are skipped. *)

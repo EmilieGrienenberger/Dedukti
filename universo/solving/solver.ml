@@ -71,7 +71,7 @@ module Make (Solver : SMTSOLVER) : SOLVER = struct
             let name = B.mk_name (Api.Env.get_name env) id in
             let sol = model name in
             let rhs = U.term_of_univ sol in
-            let rhs' = M.mk_term meta rhs in
+            let rhs' = M.process_term meta rhs in
             Format.fprintf fmt "[] %a --> %a.@." Printer.print_name name
               Printer.print_term rhs'
         | _ -> ()
@@ -144,7 +144,7 @@ module MakeUF (Solver : SMTSOLVER) : SOLVER = struct
       let handle_entry env =
         let (module Printer) = Api.Env.get_printer env in
         let find name =
-          match M.mk_term meta_constraints (T.mk_Const B.dloc name) with
+          match M.process_term meta_constraints (T.mk_Const B.dloc name) with
           | T.Const (_, name) -> name
           | _ -> assert false
         in
@@ -153,7 +153,7 @@ module MakeUF (Solver : SMTSOLVER) : SOLVER = struct
             let name = B.mk_name (Api.Env.get_name env) id in
             let sol = model (find name) in
             let rhs = U.term_of_univ sol in
-            let rhs' = M.mk_term meta_output rhs in
+            let rhs' = M.process_term meta_output rhs in
             Format.fprintf fmt "[] %a --> %a.@." Printer.print_name name
               Printer.print_term rhs'
         | _ -> ()
@@ -180,7 +180,7 @@ module MakeUF (Solver : SMTSOLVER) : SOLVER = struct
   let solve ~load_path solver_env =
     let meta = M.default_config ~meta_rules:!rules ~load_path () in
     let normalize : U.pred -> U.pred =
-     fun p -> U.extract_pred (M.mk_term meta (U.term_of_pred p))
+     fun p -> U.extract_pred (M.process_term meta (U.term_of_pred p))
     in
     L.log_solver "[NORMALIZE CONSTRAINTS...]";
     let sp' = SP.map normalize !sp in

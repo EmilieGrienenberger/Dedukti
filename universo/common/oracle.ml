@@ -12,7 +12,7 @@ let rec enumerate : int -> U.univ list =
 (** [is_true meta p] check if the predicate [p] is true in the original theory. *)
 let is_true (meta : M.cfg) p =
   let t = U.term_of_pred p in
-  let t' = M.mk_term meta t in
+  let t' = M.process_term meta t in
   T.term_eq (U.true_ ()) t'
 
 (** [is_true_axiom meta s s'] check if the predicate [Axiom s s'] is true in the original theory. *)
