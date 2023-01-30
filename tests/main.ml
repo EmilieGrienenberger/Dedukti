@@ -126,7 +126,9 @@ module Check = struct
       ok ~regression:true ~basename:"nsteps4.dk" [];
       ok ~basename:"dotpat.dk" [];
       ok ~basename:"type_rewrite.dk" [];
-      ok ~basename:"pragma.dk" []
+      ok ~basename:"pragma.dk" [];
+
+      ok ~basename:"backslash.dk" []
 
     module Acu = struct
       let ok ~basename =
@@ -286,6 +288,14 @@ module Check = struct
         ko ~error:(`Code 506) ~basename:"eta_arity.dk" []
     end
   end
+end
+
+module Libraries = struct
+  let makefile_path = "libraries/Makefile"
+
+  let _ =
+    Test.register ~__FILE__ ~title:"libraries" ~tags:["library"] @@ fun () ->
+    Process.run "make" ["-f"; makefile_path]
 end
 
 let _ =
