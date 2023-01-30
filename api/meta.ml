@@ -260,6 +260,7 @@ module PROD = struct
           Signature.Definable Free,
           mk_Type dloc )
     in
+    (*FIXME: add entries_decl only if metaentries is enabled. *)
     List.map mk_decl (["ty"; "prod"] @ entries_decl)
 
   let signature =
@@ -363,7 +364,7 @@ module LF = struct
           Signature.Definable Free,
           mk_Type dloc )
     in
-    List.map mk_decl ["ty"; "var"; "sym"; "lam"; "app"; "prod"]
+    List.map mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ entries_decl)
 
   let signature =
     let find_object_file = Files.find_object_file_exn Files.empty in
@@ -372,7 +373,7 @@ module LF = struct
       Signature.add_declaration sg dloc (mk_ident id) Signature.Public
         (Signature.Definable Free) (mk_Type dloc)
     in
-    List.iter mk_decl ["ty"; "var"; "sym"; "lam"; "app"; "prod"];
+    List.iter mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ entries_decl);
     sg
 
   let safe = false
@@ -496,7 +497,7 @@ module APP = struct
           Signature.Definable Free,
           mk_Type dloc )
     in
-    List.map mk_decl ["ty"; "var"; "sym"; "lam"; "app"; "prod"]
+    List.map mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ entries_decl)
 
   let signature =
     let find_object_file = Files.find_object_file_exn Files.empty in
@@ -505,7 +506,7 @@ module APP = struct
       Signature.add_declaration sg dloc (mk_ident id) Signature.Public
         (Signature.Definable Free) (mk_Type dloc)
     in
-    List.iter mk_decl ["ty"; "var"; "sym"; "lam"; "app"; "prod"];
+    List.iter mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ entries_decl);
     sg
 
   let safe = true
@@ -686,7 +687,7 @@ let get_meta_signature cfg env =
             ~msg:
               "A type checking environment must be provided when the \
                normalisation strategy is done via the type checking \
-               environmenet"
+               environment"
             ()
       | Some env -> Env.get_signature env)
 
