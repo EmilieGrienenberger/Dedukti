@@ -4,11 +4,11 @@ open Parsers
 module type ENCODING = sig
   val md : Basic.mident
 
-  val entries : unit -> Entry.entry list
+  val entries : string list -> Entry.entry list
 
   val safe : bool
 
-  val signature : Signature.t
+  val signature : string list -> Signature.t
 
   val encode_term :
     ?sg:Signature.t -> ?ctx:Term.typed_context -> Term.term -> Term.term
@@ -18,8 +18,45 @@ module type ENCODING = sig
   val encode_rule : ?sg:Signature.t -> 'a Rule.rule -> 'a Rule.rule
 end
 
+module NO_ENCODING = struct
+  open Basic
+  open Term
+
+  let md = mk_mident "no_encoding"
+
+  let entries additional_decls =
+    let mk_decl id =
+      Entry.Decl
+        ( dloc,
+          mk_ident id,
+          Signature.Public,
+          Signature.Definable Free,
+          mk_Type dloc )
+    in
+    List.map mk_decl additional_decls
+
+    let signature additional_decls =
+    let find_object_file = Files.find_object_file_exn Files.empty in
+    let sg = Signature.make ~explicit_import:false md find_object_file in
+    let mk_decl id =
+      Signature.add_declaration sg dloc (mk_ident id) Signature.Public
+        (Signature.Definable Free) (mk_Type dloc)
+    in
+    List.iter mk_decl additional_decls;
+    sg
+
+  let safe = false
+
+  let encode_term ?sg:_ ?ctx:_ t = t
+
+  let encode_rule ?sg:_ r = r
+
+  let decode_term t = t
+end
+
 module type ENCODING_ENTRIES = sig
   include ENCODING
+  val additional_decls : string list
   val encode_entry :
     ?sg:Signature.t -> ?ctx:Term.typed_context -> Entry.entry -> Term.term list
 
@@ -48,6 +85,8 @@ module MakeEntries (E : ENCODING) : ENCODING_ENTRIES = struct
 
   let name_of str = mk_name E.md (mk_ident str)
   let const_of str = mk_Const dloc (name_of str)
+
+  let additional_decls = ["Decl"; "Def"; "Rule"; "Public"; "Private"; "Static"; "Definable"; "Injective"; "EmptyEntry" ; "Opaque"; "Transparent"]
 
   let encode_id id = const_of (string_of_ident id)
 
@@ -162,8 +201,6 @@ module MakeEntries (E : ENCODING) : ENCODING_ENTRIES = struct
     | _               -> assert false
 end
 
-let entries_decl = ["Decl"; "Def"; "Rule"; "Public"; "Private"; "Static"; "Definable"; "Injective"; "EmptyEntry" ; "Opaque"; "Transparent"]
-
 module RNS = Set.Make (struct
   type t = Rule.rule_name
 
@@ -179,7 +216,7 @@ type cfg = {
   (* Allows beta doing normalization *)
   register_before : bool;
   (* entries are registered before they have been normalized *)
-  encoding : (module ENCODING) option;
+  encoding : (module ENCODING);
   (* Encoding specify a quoting mechanism *)
   metaentries : bool;
   (* Entries are reified *)
@@ -193,17 +230,17 @@ let signature_add_rule sg r = Signature.add_rules sg [Rule.to_rule_infos r]
 (* Several rules might be bound to different constants *)
 let signature_add_rules sg rs = List.iter (signature_add_rule sg) rs
 
-let default_config ?meta_rules ?(beta = true) ?encoding ?(metaentries=false) ?(decoding = true)
-      ?(register_before = true) ~load_path () =
+let default_config ?meta_rules ?(beta = true) ?(encoding = (module NO_ENCODING : ENCODING))
+      ?(metaentries=false) ?(decoding = true) ?(register_before = true) ~load_path () =
   let meta_mident = Basic.mk_mident "<meta>" in
   let find_object_file = Files.find_object_file_exn load_path in
   let meta_signature =
     Signature.make ~explicit_import:false meta_mident find_object_file
   in
-  Option.iter
-    (fun (module E : ENCODING) ->
-      Signature.import_signature meta_signature E.signature)
-    encoding;
+  let module E = (val encoding) in
+  let module Entries = (val (module MakeEntries(E) : ENCODING_ENTRIES)) in
+  let additional_decls = Entries.additional_decls in
+  Signature.import_signature meta_signature (E.signature additional_decls);
   (* FIXME: only one traversal is needed instead of 2 *)
   let meta_rules =
     Option.map
@@ -251,7 +288,7 @@ module PROD = struct
 
   let md = mk_mident "prod"
 
-  let entries () =
+  let entries additional_decls =
     let mk_decl id =
       Entry.Decl
         ( dloc,
@@ -260,17 +297,16 @@ module PROD = struct
           Signature.Definable Free,
           mk_Type dloc )
     in
-    (*FIXME: add entries_decl only if metaentries is enabled. *)
-    List.map mk_decl (["ty"; "prod"] @ entries_decl)
+    List.map mk_decl (["ty"; "prod"] @ additional_decls)
 
-  let signature =
+  let signature additional_decls =
     let find_object_file = Files.find_object_file_exn Files.empty in
     let sg = Signature.make ~explicit_import:false md find_object_file in
     let mk_decl id =
       Signature.add_declaration sg dloc (mk_ident id) Signature.Public
         (Signature.Definable Free) (mk_Type dloc)
     in
-    List.iter mk_decl (["ty"; "prod"] @ entries_decl);
+    List.iter mk_decl (["ty"; "prod"] @ additional_decls);
     sg
 
   let safe = false
@@ -355,7 +391,7 @@ module LF = struct
 
   let md = mk_mident "lf"
 
-  let entries () =
+  let entries additional_decls =
     let mk_decl id =
       Entry.Decl
         ( dloc,
@@ -364,16 +400,16 @@ module LF = struct
           Signature.Definable Free,
           mk_Type dloc )
     in
-    List.map mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ entries_decl)
+    List.map mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ additional_decls)
 
-  let signature =
+  let signature additional_decls =
     let find_object_file = Files.find_object_file_exn Files.empty in
     let sg = Signature.make ~explicit_import:false md find_object_file in
     let mk_decl id =
       Signature.add_declaration sg dloc (mk_ident id) Signature.Public
         (Signature.Definable Free) (mk_Type dloc)
     in
-    List.iter mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ entries_decl);
+    List.iter mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ additional_decls);
     sg
 
   let safe = false
@@ -488,7 +524,7 @@ module APP = struct
 
   let md = mk_mident "ltyped"
 
-  let entries () =
+  let entries additional_decls =
     let mk_decl id =
       Entry.Decl
         ( dloc,
@@ -497,16 +533,16 @@ module APP = struct
           Signature.Definable Free,
           mk_Type dloc )
     in
-    List.map mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ entries_decl)
+    List.map mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ additional_decls)
 
-  let signature =
+  let signature additional_decls =
     let find_object_file = Files.find_object_file_exn Files.empty in
     let sg = Signature.make ~explicit_import:false md find_object_file in
     let mk_decl id =
       Signature.add_declaration sg dloc (mk_ident id) Signature.Public
         (Signature.Definable Free) (mk_Type dloc)
     in
-    List.iter mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ entries_decl);
+    List.iter mk_decl (["ty"; "var"; "sym"; "lam"; "app"; "prod"] @ additional_decls);
     sg
 
   let safe = true
@@ -650,26 +686,23 @@ module APP = struct
 end
 
 let encode cfg env term =
-  match cfg.encoding with
-  | None -> term
-  | Some (module E : ENCODING) ->
-      if E.safe then
-        match env with
-        | None ->
-            Errors.fail_sys_error
-              ~msg:
-                "A type checking environment must be provided when a safe \
-                 encoding is used."
-              ()
-        | Some env ->
-            let sg = Env.get_signature env in
-            E.encode_term ~sg term
-      else E.encode_term term
+  let module E = (val cfg.encoding) in
+  if E.safe then
+    match env with
+    | None ->
+        Errors.fail_sys_error
+          ~msg:
+          "A type checking environment must be provided when a safe \
+           encoding is used."
+          ()
+    | Some env ->
+        let sg = Env.get_signature env in
+        E.encode_term ~sg term
+  else E.encode_term term
 
 let decode cfg term =
-  match cfg.encoding with
-  | None -> term
-  | Some (module E : ENCODING) -> E.decode_term term
+  let module E = (val cfg.encoding) in
+  E.decode_term term
 
 let normalize cfg sg term =
   let red = red_cfg cfg in
@@ -697,23 +730,20 @@ let mk_term ?env cfg term =
   let term'' = normalize cfg sg term' in
   if cfg.decoding then decode cfg term'' else term''
 
-
 let mk_rule env cfg (r : Rule.partially_typed_rule) =
   let open Rule in
   let meta_signature = get_meta_signature cfg (Some env) in
-  match cfg.encoding with
-  | None -> {r with rhs = normalize cfg meta_signature r.rhs}
-  | Some (module E : ENCODING) ->
-      let sg = Env.get_signature env in
-      let r' = E.encode_rule ~sg r in
-      let pat' = normalize cfg meta_signature (Rule.pattern_to_term r'.pat) in
-      let pat'' =
-        if cfg.decoding then pattern_of_term (E.decode_term pat')
-        else pattern_of_term pat'
-      in
-      let rhs' = normalize cfg meta_signature r'.rhs in
-      let rhs'' = if cfg.decoding then decode cfg rhs' else rhs' in
-      {pat = pat''; rhs = rhs''; ctx = r.ctx; name = r.name}
+  let module E = (val cfg.encoding) in
+  let sg = Env.get_signature env in
+  let r' = E.encode_rule ~sg r in
+  let pat' = normalize cfg meta_signature (Rule.pattern_to_term r'.pat) in
+  let pat'' =
+    if cfg.decoding then pattern_of_term (E.decode_term pat')
+    else pattern_of_term pat'
+  in
+  let rhs' = normalize cfg meta_signature r'.rhs in
+  let rhs'' = if cfg.decoding then decode cfg rhs' else rhs' in
+  {pat = pat''; rhs = rhs''; ctx = r.ctx; name = r.name}
 
 module D = Basic.Debug
 
@@ -728,6 +758,7 @@ let mk_entry cfg env entry =
   let open Rule in
   let sg = Env.get_signature env in
   let md = Env.get_name env in
+  let module E = (val cfg.encoding) in
   match entry with
   | Decl (lc, id, sc, st, ty) ->
       log "[NORMALIZE] %a" Basic.pp_ident id;
@@ -742,10 +773,10 @@ let mk_entry cfg env entry =
         {name = Delta cst; ctx = []; pat = Pattern (lc, cst, []); rhs = te}
       in
       let safe_ty =
-        match (cfg.encoding, ty) with
-        | Some (module E : ENCODING), None when E.safe -> Env.infer env te
-        | _, Some ty -> ty
-        | _, _ -> Term.mk_Type Basic.dloc
+        match ty with
+        | None when E.safe -> Env.infer env te
+        | Some ty -> ty
+        | _ -> Term.mk_Type Basic.dloc
       in
       let safe_ty' = mk_term ~env cfg safe_ty in
       let te' = mk_term ~env cfg te in

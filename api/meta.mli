@@ -21,13 +21,13 @@ module type ENCODING = sig
   val md : Basic.mident
 
   (** List of declarations *)
-  val entries : unit -> Entry.entry list
+  val entries : string list -> Entry.entry list
 
   (** If [safe], the encoding needs type checking. Type checking is done before encoding. *)
   val safe : bool
 
   (** Signature of the encoding. Redudant with [entries] *)
-  val signature : Signature.t
+  val signature : string list -> Signature.t
 
   (** [encode_term sg ctx t] encodes a term [t]. [sg] and [ctx] are used only if [safe] is true *)
   val encode_term :
@@ -44,6 +44,9 @@ end
 module type ENCODING_ENTRIES = sig
   include ENCODING
 
+  (** List of additional declarations to reify entries *)
+  val additional_decls : string list
+
   (** [encode_entry sg ctx t] encodes an entry [e]. [sg] and [ctx] are used only if [safe] is true *)
   val encode_entry :
     ?sg:Signature.t -> ?ctx:Term.typed_context -> Entry.entry -> Term.term list
@@ -54,6 +57,9 @@ end
 
 (**Generating entry reification from term reification. *)
 module MakeEntries (E : ENCODING) : ENCODING_ENTRIES
+
+(** The identity encoding: no encoding. *)
+module NO_ENCODING : ENCODING
 
 (** A shallow encoding of products. This encoding allows to rewrite
    products. *)
